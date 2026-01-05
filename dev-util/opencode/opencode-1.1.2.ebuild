@@ -24,7 +24,7 @@ RESTRICT="!test? ( test )"
 # Build dependencies
 BDEPEND="
 	>=dev-lang/go-1.24
-	net-libs/nodejs[npm]
+	net-libs/bun-bin
 "
 
 # Runtime dependencies  
@@ -45,21 +45,10 @@ pkg_pretend() {
 		die "Please emerge >=dev-lang/go-1.24"
 	fi
 	
-	# Check for Node.js and npm
-	if ! has_version "net-libs/nodejs"; then
-		eerror "OpenCode requires Node.js runtime for building"
-		die "Please emerge net-libs/nodejs"
-	fi
-	
-	if ! command -v node >/dev/null 2>&1; then
-		eerror "Node.js runtime not found in PATH"
-		die "node not found in PATH"
-	fi
-	
-	if ! command -v npm >/dev/null 2>&1; then
-		eerror "npm package manager not found in PATH"
-		eerror "Please ensure net-libs/nodejs was built with npm USE flag"
-		die "npm not found in PATH"
+	# Check for Bun
+	if ! command -v bun >/dev/null 2>&1; then
+		eerror "Bun runtime not found in PATH"
+		die "bun not found in PATH"
 	fi
 }
 
@@ -88,71 +77,41 @@ src_compile() {
 	export CGO_ENABLED=0
 	export GO111MODULE=on
 	
-	einfo "Installing Node.js dependencies..."
-	npm install || die "Failed to install dependencies"
-	
-	# Install ts-node for TypeScript runtime support
-	npm install --save-dev ts-node typescript @types/node || die "Failed to install TypeScript dependencies"
+	einfo "Installing dependencies with Bun..."
+	# We need to install dependencies for the workspace
+	bun install --frozen-lockfile || die "Failed to install dependencies"
 	
 	# Build the Go TUI component
 	einfo "Building Go TUI component..."
-	cd packages/tui || die "Cannot change to packages/tui directory"
+	pushd packages/tui >/dev/null || die "Cannot change to packages/tui directory"
 	
 	local go_ldflags="-s -w -X main.Version=${PV}"
 	ego build -ldflags="${go_ldflags}" -o tui cmd/opencode/main.go
 	
-	# Build the main Node.js binary with npm
-	einfo "Building main binary with npm..."
-	cd ../opencode || die "Cannot change to packages/opencode directory"
+	# Verify TUI binary exists
+	[[ -f tui ]] || die "TUI binary failed to build"
+	local tui_path="$(realpath tui)"
+	popd >/dev/null || die
 	
-	# Define build-time constants
-	local tui_path="$(realpath ../tui/tui)"
+	# Build the main binary with Bun
+	einfo "Building main binary with Bun..."
+	pushd packages/opencode >/dev/null || die "Cannot change to packages/opencode directory"
+	
 	export OPENCODE_TUI_PATH="${tui_path}"
 	export OPENCODE_VERSION="${PV}"
 	
-	# Create executable wrapper script that runs TypeScript directly with Node.js
-	# This avoids complex TypeScript compilation and uses Node.js's built-in support
-	cat > opencode << 'EOF'
-#!/usr/bin/env node
-
-// Set environment variables
-process.env.OPENCODE_TUI_PATH = process.env.OPENCODE_TUI_PATH || '';
-process.env.OPENCODE_VERSION = process.env.OPENCODE_VERSION || '';
-
-// Enable TypeScript support via ts-node or direct execution
-const path = require('path');
-const fs = require('fs');
-
-const srcPath = path.join(__dirname, 'src', 'index.ts');
-const jsPath = path.join(__dirname, 'src', 'index.js');
-
-// Try to run TypeScript file directly if possible
-if (fs.existsSync(srcPath)) {
-    try {
-        require('ts-node/register');
-        require(srcPath);
-    } catch (err) {
-        // Fallback to JavaScript if available
-        if (fs.existsSync(jsPath)) {
-            require(jsPath);
-        } else {
-            console.error('Could not load TypeScript or JavaScript entry point');
-            process.exit(1);
-        }
-    }
-} else if (fs.existsSync(jsPath)) {
-    require(jsPath);
-} else {
-    console.error('No entry point found');
-    process.exit(1);
-}
-EOF
-
-	# Set environment variables in the script
-	sed -i "s|process.env.OPENCODE_TUI_PATH = process.env.OPENCODE_TUI_PATH .*|process.env.OPENCODE_TUI_PATH = '${tui_path}';|" opencode
-	sed -i "s|process.env.OPENCODE_VERSION = process.env.OPENCODE_VERSION .*|process.env.OPENCODE_VERSION = '${PV}';|" opencode
+	# Compile to native binary
+	# We use --define to inject the environment variables at build time if needed,
+	# but typically for a CLI tool we might want runtime env vars or baked constants.
+	# Based on the previous logic, these were process.env vars.
+	# bun build --compile will make a standalone executable.
 	
-	chmod +x opencode || die "Failed to make binary executable"
+	bun build --compile --minify --sourcemap \
+		--define "process.env.OPENCODE_TUI_PATH='${tui_path}'" \
+		--define "process.env.OPENCODE_VERSION='${PV}'" \
+		./src/index.ts --outfile opencode || die "Failed to build binary"
+		
+	popd >/dev/null || die
 	
 	einfo "Build completed successfully"
 }
