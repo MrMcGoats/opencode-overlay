@@ -11,8 +11,8 @@ MY_PV="${PV}"
 MY_P="${PN%-bin}-${MY_PV}"
 
 SRC_URI="
-	amd64? ( https://github.com/sst/opencode/releases/download/v${MY_PV}/opencode-linux-x64.zip -> ${MY_P}-linux-x64.zip )
-	arm64? ( https://github.com/sst/opencode/releases/download/v${MY_PV}/opencode-linux-arm64.zip -> ${MY_P}-linux-arm64.zip )
+	amd64? ( https://github.com/sst/opencode/releases/download/v${MY_PV}/opencode-linux-x64.tar.gz -> ${MY_P}-linux-x64.tar.gz )
+	arm64? ( https://github.com/sst/opencode/releases/download/v${MY_PV}/opencode-linux-arm64.tar.gz -> ${MY_P}-linux-arm64.tar.gz )
 "
 
 LICENSE="MIT"
@@ -28,7 +28,7 @@ RDEPEND="
 DEPEND=""
 
 # No build dependencies needed for binary package
-BDEPEND="app-arch/unzip"
+BDEPEND=""
 
 # Binary package - no compilation needed
 QA_PREBUILT="usr/bin/opencode"
